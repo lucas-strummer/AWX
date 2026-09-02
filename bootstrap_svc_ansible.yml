@@ -1,0 +1,130 @@
+---
+- name: Generar la clave y almacenarla como credencial de AWX
+  hosts: localhost
+  gather_facts: false
+  vars:
+    svc_ansible_user: svc_ansible
+    svc_ansible_credential_name: "svc_ansible SSH"
+    svc_ansible_organization: "Default"
+    svc_ansible_key_type: ed25519
+    svc_ansible_key_comment: "svc_ansible@awx"
+
+  tasks:
+    - name: Validar variables requeridas
+      ansible.builtin.assert:
+        that:
+          - svc_ansible_credential_name | length > 0
+          - svc_ansible_organization | length > 0
+        fail_msg: >-
+          Defina svc_ansible_credential_name y svc_ansible_organization para su
+          instalación de AWX.
+
+    - name: Crear directorio temporal protegido
+      ansible.builtin.tempfile:
+        state: directory
+        prefix: svc_ansible_
+      register: svc_key_tempdir
+      no_log: true
+
+    - name: Generar, guardar y desplegar la clave
+      block:
+        - name: Generar par de claves SSH
+          community.crypto.openssh_keypair:
+            path: "{{ svc_key_tempdir.path }}/id_{{ svc_ansible_key_type }}"
+            type: "{{ svc_ansible_key_type }}"
+            comment: "{{ svc_ansible_key_comment }}"
+            mode: "0600"
+            regenerate: full_idempotence
+          register: svc_generated_key
+          no_log: true
+
+        - name: Leer la clave privada
+          ansible.builtin.slurp:
+            src: "{{ svc_key_tempdir.path }}/id_{{ svc_ansible_key_type }}"
+          register: svc_private_key_file
+          no_log: true
+
+        - name: Leer la clave pública
+          ansible.builtin.slurp:
+            src: "{{ svc_key_tempdir.path }}/id_{{ svc_ansible_key_type }}.pub"
+          register: svc_public_key_file
+          no_log: true
+
+        - name: Guardar la clave privada en una credencial Machine de AWX
+          awx.awx.credential:
+            name: "{{ svc_ansible_credential_name }}"
+            organization: "{{ svc_ansible_organization }}"
+            credential_type: Machine
+            state: present
+            update_secrets: true
+            inputs:
+              username: "{{ svc_ansible_user }}"
+              ssh_key_data: "{{ svc_private_key_file.content | b64decode }}"
+          no_log: true
+
+        - name: Conservar la clave pública para el play de hosts Linux
+          ansible.builtin.set_fact:
+            svc_ansible_public_key: >-
+              {{ svc_public_key_file.content | b64decode | trim }}
+          no_log: true
+
+        - name: Confirmar que AWX recibió la credencial
+          ansible.builtin.debug:
+            msg: >-
+              Se creó o actualizó la credencial '{{ svc_ansible_credential_name }}'
+              en la organización '{{ svc_ansible_organization }}'.
+
+      always:
+        - name: Eliminar el par de claves temporal del execution environment
+          ansible.builtin.file:
+            path: "{{ svc_key_tempdir.path }}"
+            state: absent
+          when: svc_key_tempdir.path is defined
+          no_log: true
+
+- name: Crear el usuario de automatización en Linux
+  hosts: linux
+  become: true
+  gather_facts: true
+  vars:
+    svc_ansible_user: svc_ansible
+    svc_ansible_shell: /bin/bash
+    svc_ansible_sudo_nopasswd: true
+
+  pre_tasks:
+    - name: Validar plataforma y clave pública
+      ansible.builtin.assert:
+        that:
+          - ansible_system == 'Linux'
+          - hostvars['localhost'].svc_ansible_public_key is defined
+          - hostvars['localhost'].svc_ansible_public_key is match('^ssh-')
+        fail_msg: "El host debe ser Linux y la clave pública generada debe ser válida."
+
+  tasks:
+    - name: Crear el usuario svc_ansible
+      ansible.builtin.user:
+        name: "{{ svc_ansible_user }}"
+        comment: "Cuenta de servicio para automatización de Ansible"
+        shell: "{{ svc_ansible_shell }}"
+        create_home: true
+        password_lock: true
+        state: present
+
+    - name: Instalar la clave pública autorizada
+      ansible.posix.authorized_key:
+        user: "{{ svc_ansible_user }}"
+        key: "{{ hostvars['localhost'].svc_ansible_public_key }}"
+        state: present
+        exclusive: true
+        manage_dir: true
+
+    - name: Conceder permisos administrativos mediante sudo
+      ansible.builtin.copy:
+        dest: "/etc/sudoers.d/{{ svc_ansible_user }}"
+        owner: root
+        group: root
+        mode: "0440"
+        content: >-
+          {{ svc_ansible_user }} ALL=(ALL) {{ 'NOPASSWD:' if svc_ansible_sudo_nopasswd else '' }} ALL
+        validate: "/usr/sbin/visudo -cf %s"
+
