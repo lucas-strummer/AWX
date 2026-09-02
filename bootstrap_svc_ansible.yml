@@ -1,0 +1,49 @@
+---
+- name: Crear o actualizar el usuario de automatización en Linux
+  hosts: linux
+  become: true
+  gather_facts: true
+  vars:
+    svc_ansible_user: svc_ansible
+    svc_ansible_shell: /bin/bash
+    svc_ansible_sudo_nopasswd: true
+    svc_ansible_authorized_key_exclusive: true
+
+  pre_tasks:
+    - name: Validar plataforma y clave pública inyectada por AWX
+      ansible.builtin.assert:
+        that:
+          - ansible_system == 'Linux'
+          - (svc_ansible_public_key | default('')) is match('^ssh-')
+        fail_msg: >-
+          El host debe ser Linux y el Job Template debe tener adjunta la
+          credencial 'svc_ansible Public Key'.
+
+  tasks:
+    - name: Crear el usuario svc_ansible
+      ansible.builtin.user:
+        name: "{{ svc_ansible_user }}"
+        comment: "Cuenta de servicio para automatización de Ansible"
+        shell: "{{ svc_ansible_shell }}"
+        create_home: true
+        password_lock: true
+        state: present
+
+    - name: Instalar la clave pública autorizada
+      ansible.posix.authorized_key:
+        user: "{{ svc_ansible_user }}"
+        key: "{{ svc_ansible_public_key }}"
+        state: present
+        exclusive: "{{ svc_ansible_authorized_key_exclusive | bool }}"
+        manage_dir: true
+      no_log: true
+
+    - name: Conceder permisos administrativos mediante sudo
+      ansible.builtin.copy:
+        dest: "/etc/sudoers.d/{{ svc_ansible_user }}"
+        owner: root
+        group: root
+        mode: "0440"
+        content: "{{ svc_ansible_user }} ALL=(ALL) {{ 'NOPASSWD:' if svc_ansible_sudo_nopasswd else '' }} ALL\n"
+        validate: "/usr/sbin/visudo -cf %s"
+
