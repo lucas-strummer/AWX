@@ -2,6 +2,7 @@
 - name: Generar la clave y almacenarla como credencial de AWX
   hosts: localhost
   connection: local
+  become: false
   gather_facts: false
   vars:
     svc_ansible_user: svc_ansible
