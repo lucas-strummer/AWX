@@ -1,6 +1,7 @@
 ---
 - name: Generar la clave y almacenarla como credencial de AWX
   hosts: localhost
+  connection: local
   gather_facts: false
   vars:
     svc_ansible_user: svc_ansible
@@ -24,7 +25,6 @@
         state: directory
         prefix: svc_ansible_
       register: svc_key_tempdir
-      no_log: true
 
     - name: Generar, guardar y desplegar la clave
       block:
@@ -127,4 +127,3 @@
         content: >-
           {{ svc_ansible_user }} ALL=(ALL) {{ 'NOPASSWD:' if svc_ansible_sudo_nopasswd else '' }} ALL
         validate: "/usr/sbin/visudo -cf %s"
-
