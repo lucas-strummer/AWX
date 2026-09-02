@@ -46,4 +46,3 @@
         mode: "0440"
         content: "{{ svc_ansible_user }} ALL=(ALL) {{ 'NOPASSWD:' if svc_ansible_sudo_nopasswd else '' }} ALL\n"
         validate: "/usr/sbin/visudo -cf %s"
-

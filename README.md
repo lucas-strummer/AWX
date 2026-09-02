@@ -42,10 +42,14 @@ todos los hosts.
 
 El Job Template de `bootstrap_svc_ansible.yml` debe usar:
 
-- el inventario que contiene el grupo `linux`;
+- el inventario que contiene los servidores Linux de destino;
 - una credencial `Machine` administrativa existente durante el alta inicial;
 - la credencial `svc_ansible Public Key`;
 - `Privilege Escalation`, si la credencial administrativa lo requiere.
+
+El playbook usa `hosts: all`: AWX determina los equipos mediante el inventario
+seleccionado. Para ejecutar sobre un subconjunto, complete el campo `Límite` del
+Job Template o actívelo como opción de pregunta al ejecutar.
 
 El bootstrap no genera claves. Puede ejecutarse repetidamente y también sobre
 servidores nuevos: crea o actualiza el mismo usuario, instala siempre la misma
