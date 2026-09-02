@@ -1,0 +1,363 @@
+---
+- name: Verificar mitigación de CVE-2026-46333
+  hosts: all
+  become: true
+  gather_facts: true
+
+  vars_files:
+    - vars/fixed-kernels.yml
+
+  vars:
+    cve_id: "CVE-2026-46333"
+
+  tasks:
+    - name: Obtener kernel actualmente cargado
+      ansible.builtin.command:
+        cmd: uname -r
+      register: running_kernel_cmd
+      changed_when: false
+
+    - name: Obtener kernel compilado
+      ansible.builtin.command:
+        cmd: uname -v
+      register: kernel_build_cmd
+      changed_when: false
+
+    - name: Leer kernel.yama.ptrace_scope
+      ansible.builtin.command:
+        cmd: sysctl -n kernel.yama.ptrace_scope
+      register: ptrace_scope_cmd
+      changed_when: false
+      failed_when: false
+
+    - name: Definir identificación del sistema
+      ansible.builtin.set_fact:
+        running_kernel: "{{ running_kernel_cmd.stdout | trim }}"
+        distro_key: >-
+          {{
+            ansible_distribution | lower
+          }}-{{ ansible_distribution_version }}
+        distro_major_key: >-
+          {{
+            ansible_distribution | lower
+          }}-{{ ansible_distribution_major_version }}
+        ptrace_scope: >-
+          {{
+            ptrace_scope_cmd.stdout | default('no disponible') | trim
+          }}
+
+    ######################################################################
+    # DEBIAN / UBUNTU
+    ######################################################################
+
+    - name: Obtener paquete correspondiente al kernel cargado en Debian/Ubuntu
+      ansible.builtin.shell: |
+        set -o pipefail
+        dpkg-query \
+          -W \
+          -f='${binary:Package}|${Version}\n' \
+          "linux-image-{{ running_kernel }}"
+      args:
+        executable: /bin/bash
+      register: deb_kernel_package_cmd
+      changed_when: false
+      failed_when: false
+      when: ansible_os_family == "Debian"
+
+    - name: Guardar paquete y versión Debian/Ubuntu
+      ansible.builtin.set_fact:
+        kernel_package_name: >-
+          {{
+            deb_kernel_package_cmd.stdout.split('|')[0]
+            if deb_kernel_package_cmd.rc == 0
+            else 'desconocido'
+          }}
+        kernel_package_version: >-
+          {{
+            deb_kernel_package_cmd.stdout.split('|')[1]
+            if deb_kernel_package_cmd.rc == 0
+            else 'desconocida'
+          }}
+      when: ansible_os_family == "Debian"
+
+    - name: Seleccionar versión mínima para Debian/Ubuntu
+      ansible.builtin.set_fact:
+        minimum_fixed_version: >-
+          {{
+            fixed_kernel_versions.get(distro_key,
+              fixed_kernel_versions.get(distro_major_key, '')
+            )
+          }}
+      when: ansible_os_family == "Debian"
+
+    - name: Comparar versión del paquete con dpkg
+      ansible.builtin.command:
+        argv:
+          - dpkg
+          - --compare-versions
+          - "{{ kernel_package_version }}"
+          - ge
+          - "{{ minimum_fixed_version }}"
+      register: deb_version_comparison
+      changed_when: false
+      failed_when: false
+      when:
+        - ansible_os_family == "Debian"
+        - minimum_fixed_version | length > 0
+        - kernel_package_version != "desconocida"
+
+    - name: Determinar estado Debian/Ubuntu
+      ansible.builtin.set_fact:
+        cve_status: >-
+          {% if minimum_fixed_version | length == 0 %}
+          DESCONOCIDO - no existe versión mínima configurada
+          {% elif kernel_package_version == 'desconocida' %}
+          DESCONOCIDO - no se pudo identificar el paquete cargado
+          {% elif deb_version_comparison.rc == 0 %}
+          CORREGIDO
+          {% else %}
+          VULNERABLE
+          {% endif %}
+      when: ansible_os_family == "Debian"
+
+    ######################################################################
+    # RED HAT / CENTOS / ROCKY / ALMA / ORACLE LINUX
+    ######################################################################
+
+    - name: Obtener paquete correspondiente al kernel cargado en familia RedHat
+      ansible.builtin.shell: |
+        set -o pipefail
+
+        kernel_file="/boot/vmlinuz-{{ running_kernel }}"
+
+        if [[ ! -e "$kernel_file" ]]; then
+            echo "No existe $kernel_file" >&2
+            exit 1
+        fi
+
+        rpm -qf \
+          --qf '%{NAME}|%{EPOCHNUM}:%{VERSION}-%{RELEASE}.%{ARCH}\n' \
+          "$kernel_file"
+      args:
+        executable: /bin/bash
+      register: rpm_kernel_package_cmd
+      changed_when: false
+      failed_when: false
+      when: ansible_os_family == "RedHat"
+
+    - name: Guardar paquete y versión RPM
+      ansible.builtin.set_fact:
+        kernel_package_name: >-
+          {{
+            rpm_kernel_package_cmd.stdout.split('|')[0]
+            if rpm_kernel_package_cmd.rc == 0
+            else 'desconocido'
+          }}
+        kernel_package_version: >-
+          {{
+            rpm_kernel_package_cmd.stdout.split('|')[1]
+            if rpm_kernel_package_cmd.rc == 0
+            else 'desconocida'
+          }}
+      when: ansible_os_family == "RedHat"
+
+    - name: Seleccionar versión mínima para familia RedHat
+      ansible.builtin.set_fact:
+        minimum_fixed_version: >-
+          {{
+            fixed_kernel_versions.get(distro_key,
+              fixed_kernel_versions.get(distro_major_key, '')
+            )
+          }}
+      when: ansible_os_family == "RedHat"
+
+    - name: Comparar versiones RPM utilizando bindings de RPM
+      ansible.builtin.shell: |
+        set -euo pipefail
+
+        CURRENT='{{ kernel_package_version }}'
+        MINIMUM='{{ minimum_fixed_version }}'
+
+        PYTHON=""
+
+        for candidate in \
+          /usr/libexec/platform-python \
+          /usr/bin/python3 \
+          /usr/bin/python
+        do
+            if [[ -x "$candidate" ]] &&
+               "$candidate" -c 'import rpm' >/dev/null 2>&1
+            then
+                PYTHON="$candidate"
+                break
+            fi
+        done
+
+        if [[ -z "$PYTHON" ]]; then
+            echo "No se encontró Python con el módulo rpm" >&2
+            exit 2
+        fi
+
+        "$PYTHON" - "$CURRENT" "$MINIMUM" <<'PYTHON'
+        import rpm
+        import sys
+
+        def split_evr(value):
+            epoch = "0"
+            version_release = value
+
+            if ":" in value:
+                epoch, version_release = value.split(":", 1)
+
+            if "-" in version_release:
+                version, release = version_release.split("-", 1)
+            else:
+                version = version_release
+                release = ""
+
+            return epoch, version, release
+
+        current = split_evr(sys.argv[1])
+        minimum = split_evr(sys.argv[2])
+
+        comparison = rpm.labelCompare(current, minimum)
+
+        if comparison >= 0:
+            sys.exit(0)
+
+        sys.exit(1)
+        PYTHON
+      args:
+        executable: /bin/bash
+      register: rpm_version_comparison
+      changed_when: false
+      failed_when: false
+      when:
+        - ansible_os_family == "RedHat"
+        - minimum_fixed_version | length > 0
+        - kernel_package_version != "desconocida"
+
+    - name: Determinar estado familia RedHat
+      ansible.builtin.set_fact:
+        cve_status: >-
+          {% if minimum_fixed_version | length == 0 %}
+          DESCONOCIDO - no existe versión mínima configurada
+          {% elif kernel_package_version == 'desconocida' %}
+          DESCONOCIDO - no se pudo identificar el paquete cargado
+          {% elif rpm_version_comparison.rc == 0 %}
+          CORREGIDO
+          {% elif rpm_version_comparison.rc == 1 %}
+          VULNERABLE
+          {% else %}
+          DESCONOCIDO - no se pudo comparar la versión RPM
+          {% endif %}
+      when: ansible_os_family == "RedHat"
+
+    ######################################################################
+    # OTROS SISTEMAS
+    ######################################################################
+
+    - name: Marcar distribuciones sin soporte configurado
+      ansible.builtin.set_fact:
+        kernel_package_name: "desconocido"
+        kernel_package_version: "desconocida"
+        minimum_fixed_version: ""
+        cve_status: "DESCONOCIDO - distribución no soportada por el playbook"
+      when: ansible_os_family not in ["Debian", "RedHat"]
+
+    ######################################################################
+    # COMPROBAR SI EXISTE UN KERNEL MÁS NUEVO INSTALADO
+    ######################################################################
+
+    - name: Obtener kernel instalado más reciente en Debian/Ubuntu
+      ansible.builtin.shell: |
+        set -o pipefail
+        dpkg-query -W -f='${binary:Package}|${Version}\n' 'linux-image-[0-9]*' \
+          2>/dev/null |
+          sort -t'|' -k2,2V |
+          tail -n1
+      args:
+        executable: /bin/bash
+      register: newest_deb_kernel_cmd
+      changed_when: false
+      failed_when: false
+      when: ansible_os_family == "Debian"
+
+    - name: Obtener kernel instalado más reciente en familia RedHat
+      ansible.builtin.shell: |
+        set -o pipefail
+        rpm -q kernel kernel-core \
+          --qf '%{VERSION}-%{RELEASE}.%{ARCH}\n' 2>/dev/null |
+          sort -V |
+          tail -n1
+      args:
+        executable: /bin/bash
+      register: newest_rpm_kernel_cmd
+      changed_when: false
+      failed_when: false
+      when: ansible_os_family == "RedHat"
+
+    - name: Definir kernel más reciente instalado
+      ansible.builtin.set_fact:
+        newest_installed_kernel: >-
+          {{
+            (
+              newest_deb_kernel_cmd.stdout.split('|')[-1]
+              if ansible_os_family == 'Debian'
+              else newest_rpm_kernel_cmd.stdout
+            ) | default('desconocido') | trim
+          }}
+
+    - name: Determinar si posiblemente requiere reinicio
+      ansible.builtin.set_fact:
+        reboot_may_be_required: >-
+          {{
+            newest_installed_kernel | length > 0
+            and running_kernel not in newest_installed_kernel
+            and newest_installed_kernel not in running_kernel
+          }}
+
+    ######################################################################
+    # INFORME
+    ######################################################################
+
+    - name: Mostrar resultado por servidor
+      ansible.builtin.debug:
+        msg:
+          host: "{{ inventory_hostname }}"
+          distribution: "{{ ansible_distribution }}"
+          distribution_version: "{{ ansible_distribution_version }}"
+          architecture: "{{ ansible_architecture }}"
+          running_kernel: "{{ running_kernel }}"
+          kernel_package: "{{ kernel_package_name }}"
+          kernel_package_version: "{{ kernel_package_version }}"
+          minimum_fixed_version: >-
+            {{
+              minimum_fixed_version
+              if minimum_fixed_version | length > 0
+              else 'NO CONFIGURADA'
+            }}
+          cve: "{{ cve_id }}"
+          status: "{{ cve_status | trim }}"
+          ptrace_scope: "{{ ptrace_scope }}"
+          temporary_mitigation: >-
+            {{
+              'APLICADA'
+              if ptrace_scope | string in ['2', '3']
+              else 'NO APLICADA'
+            }}
+          newest_installed_kernel: "{{ newest_installed_kernel }}"
+          reboot_may_be_required: "{{ reboot_may_be_required }}"
+
+    - name: Marcar como fallo los servidores vulnerables
+      ansible.builtin.assert:
+        that:
+          - cve_status | trim != "VULNERABLE"
+        fail_msg: >-
+          {{ inventory_hostname }} está potencialmente afectado por
+          {{ cve_id }}. Kernel cargado: {{ running_kernel }}.
+          Paquete: {{ kernel_package_version }}.
+          Mínimo requerido: {{ minimum_fixed_version }}.
+        success_msg: >-
+          {{ inventory_hostname }} no quedó marcado como vulnerable.
+      when: cve_status | trim != "DESCONOCIDO - no existe versión mínima configurada"

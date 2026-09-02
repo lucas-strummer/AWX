@@ -1,0 +1,31 @@
+# Inventarios y datos operativos
+hosts
+inventory.ini
+inventory.yml
+inventory.yaml
+!inventory.example.yml
+**/inventory.ini
+**/hosts
+
+# Secretos y claves
+*.pem
+*.key
+*.pub
+*.vault
+vault-password*
+group_vars/*/vault.yml
+host_vars/*/vault.yml
+
+# Resultados generados
+output/
+tmp/
+**/usuarios_servidores/
+**/reporte*.json
+**/releases.csv
+*.retry
+
+# Entornos y caches
+.ansible/
+.venv/
+__pycache__/
+*.pyc

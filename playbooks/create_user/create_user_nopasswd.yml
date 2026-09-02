@@ -1,0 +1,28 @@
+---
+- name: Crear usuario con sudo sin password
+  hosts: all
+  become: true
+  vars:
+    managed_user: svc_ansible
+    managed_user_groups:
+      - sudo
+  tasks:
+    - name: Crear usuario
+      ansible.builtin.user:
+        name: "{{ managed_user }}"
+        groups: "{{ managed_user_groups }}"
+        append: true
+        state: present
+        shell: /bin/bash
+        create_home: true
+        password: "{{ managed_user_password_hash | default(omit) }}"
+      no_log: "{{ managed_user_password_hash is defined }}"
+
+    - name: Configurar sudoers validado
+      ansible.builtin.copy:
+        content: "{{ managed_user }} ALL=(ALL) NOPASSWD:ALL\n"
+        dest: "/etc/sudoers.d/{{ managed_user }}"
+        owner: root
+        group: root
+        mode: "0440"
+        validate: /usr/sbin/visudo -cf %s

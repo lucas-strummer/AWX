@@ -1,0 +1,29 @@
+---
+- name: Crear directorio SSH e instalar clave autorizada
+  hosts: all
+  become: true
+  vars:
+    managed_user: svc_ansible
+  tasks:
+    - name: Validar que la clave publica fue provista
+      ansible.builtin.assert:
+        that:
+          - managed_user_public_key is defined
+          - managed_user_public_key | trim | length > 0
+        fail_msg: Provea managed_user_public_key mediante una credencial o Ansible Vault.
+      no_log: true
+
+    - name: Crear directorio SSH
+      ansible.builtin.file:
+        path: "/home/{{ managed_user }}/.ssh"
+        state: directory
+        owner: "{{ managed_user }}"
+        group: "{{ managed_user }}"
+        mode: "0700"
+
+    - name: Instalar clave publica
+      ansible.posix.authorized_key:
+        user: "{{ managed_user }}"
+        key: "{{ managed_user_public_key }}"
+        state: present
+      no_log: true

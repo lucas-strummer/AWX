@@ -1,0 +1,70 @@
+---
+- name: Check CVE-2026-31431 Copy Fail mitigation via kmod
+  hosts: all
+  become: false
+  gather_facts: true
+
+  vars:
+    fixed_kmod_versions:
+      Ubuntu:
+        "20.04": "27-1ubuntu2.1"
+        "22.04": "29-1ubuntu1.1"
+        "24.04": "31+20240202-2ubuntu7.2"
+
+  tasks:
+    - name: Get installed kmod version
+      command: dpkg-query -W -f='${Version}' kmod
+      register: kmod_version
+      changed_when: false
+      failed_when: false
+      when: ansible_os_family == "Debian"
+
+    - name: Define required kmod version
+      set_fact:
+        required_kmod_version: "{{ fixed_kmod_versions[ansible_distribution][ansible_distribution_version] | default('UNKNOWN') }}"
+      when: ansible_os_family == "Debian"
+
+    - name: Compare kmod version
+      command: >
+        dpkg --compare-versions '{{ kmod_version.stdout }}' ge '{{ required_kmod_version }}'
+      register: kmod_compare
+      changed_when: false
+      failed_when: false
+      when:
+        - ansible_os_family == "Debian"
+        - required_kmod_version != "UNKNOWN"
+        - kmod_version.rc == 0
+
+    - name: Check if algif_aead module is blocked by kmod config
+      shell: |
+        grep -RhsE '^(install|blacklist)[[:space:]]+algif_aead\b' /etc/modprobe.d /lib/modprobe.d 2>/dev/null || true
+      register: algif_block
+      changed_when: false
+      when: ansible_os_family == "Debian"
+
+    - name: Report result
+      debug:
+        msg:
+          host: "{{ inventory_hostname }}"
+          distro: "{{ ansible_distribution }} {{ ansible_distribution_version }}"
+          kmod_installed: "{{ kmod_version.stdout | default('N/A') }}"
+          kmod_required: "{{ required_kmod_version | default('N/A') }}"
+          mitigated_by_version: >-
+            {{
+              'YES' if
+              ansible_os_family == 'Debian'
+              and required_kmod_version != 'UNKNOWN'
+              and kmod_compare.rc == 0
+              else 'NO'
+            }}
+          algif_aead_block_rule_found: "{{ algif_block.stdout_lines | default([]) }}"
+          status: >-
+            {% if ansible_os_family != 'Debian' %}
+            NOT_CHECKED_NON_DEBIAN
+            {% elif required_kmod_version == 'UNKNOWN' %}
+            UNKNOWN_DISTRO_VERSION
+            {% elif kmod_compare.rc == 0 %}
+            MITIGATED
+            {% else %}
+            VULNERABLE_OR_NOT_MITIGATED
+            {% endif %}

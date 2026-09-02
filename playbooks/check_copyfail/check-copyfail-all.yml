@@ -1,0 +1,164 @@
+---
+- name: Check Copy Fail CVE-2026-31431 mitigation across Linux distros
+  hosts: all
+  become: false
+  gather_facts: true
+
+  vars:
+    ubuntu_fixed_kmod:
+      "14.04": "15-0ubuntu7+esm1"
+      "16.04": "22-1ubuntu5.2+esm1"
+      "18.04": "24-1ubuntu3.5+esm1"
+      "20.04": "27-1ubuntu2.1+esm1"
+      "22.04": "29-1ubuntu1.1"
+      "24.04": "31+20240202-2ubuntu7.2"
+      "25.10": "34.2-2ubuntu1.1"
+
+  tasks:
+    - name: Get running kernel
+      command: uname -r
+      register: running_kernel
+      changed_when: false
+      failed_when: false
+
+    - name: Get Debian/Ubuntu kmod version
+      command: dpkg-query -W -f='${Version}' kmod
+      register: deb_kmod
+      changed_when: false
+      failed_when: false
+      when: ansible_os_family == "Debian"
+
+    - name: Get Debian/Ubuntu running kernel package
+      shell: |
+        dpkg-query -S "/boot/vmlinuz-$(uname -r)" 2>/dev/null | awk -F: '{print $1}' | head -n1
+      register: deb_kernel_pkg
+      changed_when: false
+      failed_when: false
+      when: ansible_os_family == "Debian"
+
+    - name: Get Debian/Ubuntu running kernel package version
+      shell: |
+        pkg="$(dpkg-query -S "/boot/vmlinuz-$(uname -r)" 2>/dev/null | awk -F: '{print $1}' | head -n1)"
+        if [ -n "$pkg" ]; then
+          dpkg-query -W -f='${Version}' "$pkg"
+        fi
+      register: deb_kernel_pkg_version
+      changed_when: false
+      failed_when: false
+      when: ansible_os_family == "Debian"
+
+    - name: Get RHEL/CentOS/Oracle kmod version
+      command: rpm -q kmod
+      register: rpm_kmod
+      changed_when: false
+      failed_when: false
+      when: ansible_os_family == "RedHat"
+
+    - name: Get RHEL/CentOS/Oracle running kernel package
+      command: rpm -q kernel
+      register: rpm_kernel
+      changed_when: false
+      failed_when: false
+      when: ansible_os_family == "RedHat"
+
+    - name: Check RPM changelog for CVE reference
+      shell: |
+        rpm -q --changelog kernel 2>/dev/null | grep -iE 'CVE-2026-31431|algif_aead|copy.fail|copy fail' | head -n 20 || true
+      register: rpm_cve_changelog
+      changed_when: false
+      failed_when: false
+      when: ansible_os_family == "RedHat"
+
+    - name: Check algif_aead modprobe block rule
+      shell: |
+        grep -RhsE '^(install|blacklist)[[:space:]]+algif_aead\b' \
+          /etc/modprobe.d /lib/modprobe.d /usr/lib/modprobe.d 2>/dev/null || true
+      register: algif_rule
+      changed_when: false
+      failed_when: false
+
+    - name: Check if algif_aead is currently loaded
+      shell: |
+        grep -qE '^algif_aead ' /proc/modules && echo LOADED || echo NOT_LOADED
+      register: algif_loaded
+      changed_when: false
+      failed_when: false
+
+    - name: Test AF_ALG socket availability
+      shell: |
+        python3 - <<'PY'
+        import socket
+        try:
+            s = socket.socket(socket.AF_ALG, socket.SOCK_SEQPACKET, 0)
+            s.close()
+            print("AF_ALG_OPEN")
+        except Exception:
+            print("AF_ALG_BLOCKED")
+        PY
+      register: afalg_test
+      changed_when: false
+      failed_when: false
+
+    - name: Set Ubuntu required kmod
+      set_fact:
+        ubuntu_required_kmod: "{{ ubuntu_fixed_kmod[ansible_distribution_version] | default('UNKNOWN') }}"
+      when: ansible_distribution == "Ubuntu"
+
+    - name: Compare Ubuntu kmod version
+      command: >
+        dpkg --compare-versions '{{ deb_kmod.stdout }}' ge '{{ ubuntu_required_kmod }}'
+      register: ubuntu_kmod_compare
+      changed_when: false
+      failed_when: false
+      when:
+        - ansible_distribution == "Ubuntu"
+        - ubuntu_required_kmod != "UNKNOWN"
+        - deb_kmod.stdout | length > 0
+
+    - name: Determine upstream kernel major/minor
+      shell: |
+        uname -r | sed -E 's/^([0-9]+)\.([0-9]+).*/\1 \2/'
+      register: kernel_major_minor
+      changed_when: false
+      failed_when: false
+
+    - name: Report Copy Fail status
+      debug:
+        msg:
+          host: "{{ inventory_hostname }}"
+          distro: "{{ ansible_distribution }} {{ ansible_distribution_version }}"
+          kernel_running: "{{ running_kernel.stdout }}"
+          deb_kmod_installed: "{{ deb_kmod.stdout | default('N/A') }}"
+          ubuntu_kmod_required: "{{ ubuntu_required_kmod | default('N/A') }}"
+          deb_kernel_pkg: "{{ deb_kernel_pkg.stdout | default('N/A') }}"
+          deb_kernel_pkg_version: "{{ deb_kernel_pkg_version.stdout | default('N/A') }}"
+          rpm_kmod_installed: "{{ rpm_kmod.stdout | default('N/A') }}"
+          rpm_kernel_installed: "{{ rpm_kernel.stdout_lines | default([]) }}"
+          rpm_changelog_cve_match: "{{ rpm_cve_changelog.stdout_lines | default([]) }}"
+          algif_aead_rule: "{{ algif_rule.stdout_lines }}"
+          algif_aead_loaded: "{{ algif_loaded.stdout }}"
+          af_alg_test: "{{ afalg_test.stdout }}"
+          status: >-
+            {% set km = kernel_major_minor.stdout.split() %}
+            {% set kmaj = (km[0] | int) if km|length > 0 else 0 %}
+            {% set kmin = (km[1] | int) if km|length > 1 else 0 %}
+            {% set kernel_lt_414 = (kmaj < 4) or (kmaj == 4 and kmin < 14) %}
+            {% if algif_rule.stdout | length > 0 %}
+            MITIGATED_BY_ALGIF_AEAD_BLOCK
+            {% elif ansible_distribution == "Ubuntu" and ubuntu_required_kmod is defined and ubuntu_required_kmod != "UNKNOWN" and ubuntu_kmod_compare.rc is defined and ubuntu_kmod_compare.rc == 0 %}
+            MITIGATED_BY_UBUNTU_KMOD
+            {% elif ansible_distribution == "Ubuntu" and ubuntu_required_kmod is defined and ubuntu_required_kmod != "UNKNOWN" %}
+            NOT_MITIGATED_UPDATE_KMOD
+            {% elif kernel_lt_414 %}
+            LIKELY_NOT_AFFECTED_KERNEL_LT_4_14
+            {% elif ansible_distribution == "Debian" %}
+            REVIEW_DEBIAN_KERNEL_PACKAGE_VERSION
+            {% elif ansible_os_family == "RedHat" and rpm_cve_changelog.stdout | length > 0 %}
+            POSSIBLY_FIXED_BY_VENDOR_KERNEL_CHANGELOG
+            {% elif ansible_os_family == "RedHat" %}
+            REVIEW_VENDOR_PATCH_OR_APPLY_MANUAL_MITIGATION
+            {% elif afalg_test.stdout == "AF_ALG_BLOCKED" %}
+            MITIGATED_OR_AF_ALG_UNAVAILABLE
+            {% else %}
+            UNKNOWN_REVIEW_MANUAL_MITIGATION
+            {% endif %}

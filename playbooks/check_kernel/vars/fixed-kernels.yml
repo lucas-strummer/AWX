@@ -1,0 +1,55 @@
+---
+# La comparación se realiza contra la versión del PAQUETE que contiene
+# el kernel cargado, no solamente contra uname -r.
+#
+# Las claves pueden ser:
+#
+#   distribución-versión_completa
+#   distribución-versión_mayor
+#
+# La versión completa tiene prioridad.
+
+fixed_kernel_versions:
+
+  ######################################################################
+  # Ubuntu - kernel generic
+  ######################################################################
+
+  ubuntu-26.04: "7.0.0-22.22"
+  ubuntu-25.10: "6.17.0-35.35"
+  ubuntu-24.04: "6.8.0-124.124"
+  ubuntu-22.04: "5.15.0-181.191"
+
+  # Ubuntu 20.04 con kernel GA 5.4 figura como no afectado.
+  # No se define una versión mínima.
+  #
+  # Ubuntu 20.04 con HWE 5.15 requiere un tratamiento separado:
+  # 5.15.0-181.191~20.04.1
+
+  ######################################################################
+  # Debian
+  ######################################################################
+
+  # Valores correspondientes a la versión fuente del paquete linux.
+  # Verificar que la versión binaria instalada conserve un EVR comparable.
+
+  debian-11: "5.10.251-5"
+  debian-12: "6.1.172-1"
+  debian-13: "6.12.88-1"
+
+  ######################################################################
+  # RHEL / Oracle / Rocky / Alma
+  ######################################################################
+
+  # Completar con las versiones exactas publicadas por cada proveedor.
+  #
+  # Ejemplos de claves:
+  #
+  # redhat-8: "0:4.18.0-XXX.el8_XX.x86_64"
+  # redhat-9: "0:5.14.0-XXX.el9_XX.x86_64"
+  #
+  # oraclelinux-8: "0:5.4.17-XXX.el8uek.x86_64"
+  # oraclelinux-9: "0:5.15.0-XXX.el9uek.x86_64"
+  #
+  # rockylinux-8: "0:4.18.0-XXX.el8_XX.x86_64"
+  # almalinux-9: "0:5.14.0-XXX.el9_XX.x86_64"

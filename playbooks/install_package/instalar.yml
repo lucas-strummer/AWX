@@ -1,0 +1,9 @@
+---
+ - name: Playbook to install zabbix agent
+   become: true
+   hosts: all
+   tasks:
+    - name: Ansible apt install Zabbix agent
+      apt:
+        name: zabbix-agent
+        state: present

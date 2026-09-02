@@ -1,5 +1,19 @@
 # Gestión de `svc_ansible` desde AWX
 
+Este repositorio también contiene playbooks operativos reutilizables importados
+en [`playbooks/`](playbooks/). La importación fue sanitizada antes de publicarse:
+
+- no incluye inventarios reales, direcciones IP ni reportes generados;
+- no almacena hashes de contraseñas ni claves SSH;
+- las credenciales se reciben mediante variables protegidas de AWX o Ansible
+  Vault;
+- `.gitignore` bloquea inventarios, claves, vaults y resultados habituales.
+
+Los valores mínimos para los playbooks de usuario y clave son
+`managed_user`, `managed_user_groups`, `managed_user_password_hash` y
+`managed_user_public_key`, según corresponda. Los valores sensibles deben
+inyectarse desde credenciales protegidas y nunca desde archivos versionados.
+
 La solución separa la generación de credenciales del bootstrap de servidores.
 Ninguna clave SSH se almacena en Git:
 

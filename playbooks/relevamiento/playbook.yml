@@ -1,0 +1,90 @@
+---
+- name: Relevamiento de usuarios Linux
+  hosts: testing
+  gather_facts: no
+  become: yes
+
+  vars:
+    salida_dir: "./usuarios_servidores"
+    csv_header: "host,username,uid,role,groups,last_login,ssh_enabled,telnet_enabled,state,has_cron"
+
+  tasks:
+    - name: Crear carpeta local de salida
+      delegate_to: localhost
+      file:
+        path: "{{ salida_dir }}"
+        state: directory
+        mode: '0755'
+
+    - name: Obtener usuarios (/etc/passwd)
+      command: getent passwd
+      register: passwd_out
+
+    - name: Obtener shadow (para estado de password)
+      command: getent shadow
+      register: shadow_out
+
+    - name: Procesar usuarios y generar CSV en remoto
+      shell: |
+        username="{{ item.split(':')[0] }}"
+        uid="{{ item.split(':')[2] }}"
+        groups="$(id -nG $username 2>/dev/null || true)"
+
+        # Rol
+        if echo "$groups" | grep -qw sudo || echo "$groups" | grep -qw wheel; then
+          role="administrador"
+        elif [ "$uid" -lt 1000 ]; then
+          role="servicio"
+        elif [ -d "/home/$username" ] && [ "$groups" = "$username" ]; then
+          role="operador"
+        else
+          role="otro"
+        fi
+
+        # Último login
+        last_login="$(lastlog -u $username | tail -n1 | awk '{$1=""; print $0}' | xargs)"
+
+        # Estado de cuenta
+        passwd_field="$(echo '{{ shadow_out.stdout }}' | grep \"^$username:\" | cut -d: -f2)"
+        if [[ "$passwd_field" == "!"* || "$passwd_field" == "*" ]]; then
+          state="inactive"
+        else
+          state="active"
+        fi
+
+        # SSH habilitado
+        grep -q "^$username:.*sh$" /etc/passwd && ssh_enabled="Yes" || ssh_enabled="No"
+
+        # Telnet (asumimos deshabilitado)
+        telnet_enabled="No"
+
+        # Cron
+        [ -f /var/spool/cron/crontabs/$username ] && has_cron="Yes" || has_cron="No"
+
+        echo "{{ inventory_hostname }},$username,$uid,$role,$groups,${last_login:-Never logged in},$ssh_enabled,$telnet_enabled,$state,$has_cron"
+      loop: "{{ passwd_out.stdout_lines }}"
+      register: user_csv
+
+    - name: Guardar CSV por host
+      delegate_to: localhost
+      copy:
+        dest: "{{ salida_dir }}/{{ inventory_hostname }}.csv"
+        content: |
+          {{ csv_header }}
+          {% for l in user_csv.results %}
+          {{ l.stdout }}
+          {% endfor %}
+
+- name: Consolidar CSVs en uno solo
+  hosts: localhost
+  gather_facts: no
+
+  vars:
+    salida_dir: "./usuarios_servidores"
+    csv_header: "host,username,uid,role,groups,last_login,ssh_enabled,telnet_enabled,state,has_cron"
+
+  tasks:
+    - name: Consolidar todos los CSVs
+      shell: |
+        echo "{{ csv_header }}" > {{ salida_dir }}/consolidado_usuarios.csv
+        find {{ salida_dir }} -maxdepth 1 -type f -name '*.csv' ! -name 'consolidado_usuarios.csv' -exec tail -n +2 -q {} + >> {{ salida_dir }}/consolidado_usuarios.csv

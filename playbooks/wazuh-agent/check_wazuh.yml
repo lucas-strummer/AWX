@@ -1,0 +1,143 @@
+---
+- name: Detectar instalación del agente Wazuh
+  hosts: all
+  gather_facts: true
+  become: true
+
+  vars:
+    wazuh_package_names:
+      - wazuh-agent
+      - wazuh-agent.x86_64
+      - wazuh-agent.amd64
+
+    wazuh_service_names:
+      - wazuh-agent
+      - wazuh-agent.service
+
+    wazuh_paths:
+      - /var/ossec
+      - /var/ossec/bin/wazuh-control
+      - /var/ossec/etc/ossec.conf
+
+  tasks:
+    - name: Inicializar resultados
+      ansible.builtin.set_fact:
+        wazuh_package_installed: false
+        wazuh_package_name: ""
+        wazuh_package_version: ""
+        wazuh_service_exists: false
+        wazuh_service_state: "no encontrado"
+        wazuh_service_enabled: false
+        wazuh_process_running: false
+        wazuh_files_found: []
+        wazuh_installed: false
+        wazuh_detection_method: []
+
+    - name: Obtener información de paquetes instalados
+      ansible.builtin.package_facts:
+        manager: auto
+      failed_when: false
+
+    - name: Detectar paquete wazuh-agent
+      ansible.builtin.set_fact:
+        wazuh_package_installed: true
+        wazuh_package_name: "{{ item }}"
+        wazuh_package_version: >-
+          {{
+            ansible_facts.packages[item]
+            | map(attribute='version')
+            | join(', ')
+          }}
+      loop: "{{ wazuh_package_names }}"
+      when:
+        - ansible_facts.packages is defined
+        - item in ansible_facts.packages
+
+    - name: Obtener información de servicios
+      ansible.builtin.service_facts:
+      failed_when: false
+
+    - name: Detectar servicio Wazuh
+      ansible.builtin.set_fact:
+        wazuh_service_exists: true
+        wazuh_service_state: "{{ ansible_facts.services[item].state | default('desconocido') }}"
+        wazuh_service_enabled: >-
+          {{
+            ansible_facts.services[item].status | default('unknown')
+            in ['enabled', 'static', 'indirect']
+          }}
+      loop: "{{ wazuh_service_names }}"
+      when:
+        - ansible_facts.services is defined
+        - item in ansible_facts.services
+
+    - name: Buscar procesos del agente Wazuh
+      ansible.builtin.shell: |
+        set -o pipefail
+        pgrep -af 'wazuh-agentd|wazuh-execd|wazuh-syscheckd|wazuh-logcollector|ossec-agentd'
+      args:
+        executable: /bin/bash
+      register: wazuh_processes
+      changed_when: false
+      failed_when: false
+
+    - name: Registrar si existen procesos Wazuh
+      ansible.builtin.set_fact:
+        wazuh_process_running: "{{ wazuh_processes.rc == 0 }}"
+
+    - name: Comprobar archivos y directorios de Wazuh
+      ansible.builtin.stat:
+        path: "{{ item }}"
+      loop: "{{ wazuh_paths }}"
+      register: wazuh_path_checks
+      changed_when: false
+
+    - name: Registrar archivos encontrados
+      ansible.builtin.set_fact:
+        wazuh_files_found: >-
+          {{
+            wazuh_path_checks.results
+            | selectattr('stat.exists', 'equalto', true)
+            | map(attribute='item')
+            | list
+          }}
+
+    - name: Determinar métodos de detección
+      ansible.builtin.set_fact:
+        wazuh_detection_method: >-
+          {{
+            []
+            + (['paquete'] if wazuh_package_installed else [])
+            + (['servicio'] if wazuh_service_exists else [])
+            + (['proceso'] if wazuh_process_running else [])
+            + (['archivos'] if wazuh_files_found | length > 0 else [])
+          }}
+
+    - name: Determinar si Wazuh está instalado
+      ansible.builtin.set_fact:
+        wazuh_installed: >-
+          {{
+            wazuh_package_installed
+            or wazuh_service_exists
+            or wazuh_process_running
+            or wazuh_files_found | length > 0
+          }}
+
+    - name: Mostrar resultado por servidor
+      ansible.builtin.debug:
+        msg:
+          hostname: "{{ ansible_hostname }}"
+          ip: "{{ ansible_default_ipv4.address | default(ansible_host) }}"
+          distribucion: "{{ ansible_distribution }}"
+          version_distribucion: "{{ ansible_distribution_version }}"
+          familia_so: "{{ ansible_os_family }}"
+          wazuh_instalado: "{{ wazuh_installed }}"
+          paquete_detectado: "{{ wazuh_package_installed }}"
+          nombre_paquete: "{{ wazuh_package_name | default('') }}"
+          version_paquete: "{{ wazuh_package_version | default('') }}"
+          servicio_detectado: "{{ wazuh_service_exists }}"
+          estado_servicio: "{{ wazuh_service_state }}"
+          servicio_habilitado: "{{ wazuh_service_enabled }}"
+          proceso_ejecutandose: "{{ wazuh_process_running }}"
+          archivos_encontrados: "{{ wazuh_files_found }}"
+          metodo_deteccion: "{{ wazuh_detection_method | join(', ') }}"

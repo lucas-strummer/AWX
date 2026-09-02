@@ -1,0 +1,12 @@
+---
+- name: Obtener información del sistema operativo
+  hosts: labo
+  gather_facts: no
+  tasks:
+    - name: Mostrar contenido de /etc/*release
+      ansible.builtin.shell: cat /etc/*release
+      register: release_info
+
+    - name: Mostrar salida del comando
+      ansible.builtin.debug:
+        var: release_info.stdout_lines
