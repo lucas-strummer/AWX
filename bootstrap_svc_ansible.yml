@@ -1,5 +1,6 @@
 ---
 - name: Crear o actualizar el usuario de automatización en Linux
+  hosts: all
   become: true
   gather_facts: true
   vars:
