@@ -1,0 +1,11 @@
+---
+- name: Actualizar paquetes instalados con APT
+  hosts: all
+  become: true
+  gather_facts: false
+
+  tasks:
+    - name: Ejecutar apt upgrade -y
+      ansible.builtin.apt:
+        update_cache: true
+        upgrade: "yes"
