@@ -1,0 +1,31 @@
+---
+- name: Consultar paquetes disponibles para actualizar
+  hosts: all
+  become: true
+  gather_facts: false
+
+  tasks:
+    - name: Actualizar el indice de paquetes APT
+      ansible.builtin.apt:
+        update_cache: true
+
+    - name: Consultar paquetes disponibles para actualizar
+      ansible.builtin.command:
+        argv:
+          - apt-get
+          - --simulate
+          - -o
+          - Debug::NoLocking=1
+          - upgrade
+      register: apt_upgrade_simulation
+      changed_when: false
+
+    - name: Informar la cantidad de paquetes disponibles
+      ansible.builtin.debug:
+        msg: >-
+          {{ inventory_hostname }} tiene
+          {{ apt_upgrade_simulation.stdout_lines
+             | select('match', '^Inst ')
+             | list
+             | length }}
+          paquete(s) disponible(s) para actualizar.
