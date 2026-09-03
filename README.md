@@ -108,6 +108,38 @@ La clave privada correspondiente debe cargarse como credencial de la cuenta
 `operador` en JumpServer y mantenerse fuera de Git y AWX. El playbook no concede
 permisos sudo a `operador`.
 
+## Aprovisionamiento genérico de usuarios para JumpServer
+
+El playbook
+[`playbooks/jumpserver/provisionar_usuario.yml`](playbooks/jumpserver/provisionar_usuario.yml)
+permite crear diferentes usuarios desde un único Job Template. El nombre, la
+clave pública y la concesión de sudo se reciben como variables al iniciar el
+trabajo.
+
+Configure un Survey de AWX con estos campos:
+
+| Pregunta | Tipo | Variable | Valor predeterminado |
+| --- | --- | --- | --- |
+| Nombre de usuario Linux | Text | `managed_user` | Sin valor |
+| Clave pública SSH | Textarea | `managed_user_public_key` | Sin valor |
+| ¿Conceder sudo completo? | Multiple Choice | `managed_user_sudo` | `false` |
+
+Para la última pregunta, agregue las opciones `false` y `true`. Cuando se elige
+`true`, el playbook crea `/etc/sudoers.d/jumpserver-<usuario>` con
+`NOPASSWD: ALL`. Cuando se elige `false`, elimina solamente ese archivo; no
+modifica otras reglas sudo ni los grupos de un usuario preexistente.
+
+Las cuentas nuevas siempre se crean con la contraseña bloqueada. En cuentas
+preexistentes, `managed_user_lock_password: false` permite conservar el estado
+actual de su contraseña. La clave instalada es exclusiva y sólo se acepta desde
+`10.100.100.84`; estos comportamientos pueden sobrescribirse mediante
+`managed_user_authorized_key_exclusive`,
+`managed_user_restrict_to_jumpserver` y `jumpserver_source_ip`.
+
+Si el usuario ya existe, se conservan su shell, grupo primario, comentario y
+directorio personal. El playbook administra su bloqueo de contraseña, su clave
+autorizada y únicamente el archivo sudoers con prefijo `jumpserver-`.
+
 ## Execution Environment
 
 Para `ansible-core 2.15`, las colecciones están fijadas a versiones compatibles
