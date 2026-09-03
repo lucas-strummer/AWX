@@ -141,6 +141,31 @@ personal, pero su shell se establece explícitamente en `/bin/bash`. El playbook
 también administra su bloqueo de contraseña, su clave autorizada y únicamente el
 archivo sudoers con prefijo `jumpserver-`.
 
+## Eliminación de usuarios mediante Survey
+
+El playbook
+[`playbooks/delete_user/delete_user.yml`](playbooks/delete_user/delete_user.yml)
+elimina de los hosts seleccionados el usuario indicado al iniciar el trabajo.
+Configure un Job Template con el inventario y una credencial con escalamiento de
+privilegios, y agregue este Survey:
+
+| Pregunta | Tipo | Variable | Obligatoria | Valor predeterminado |
+| --- | --- | --- | --- | --- |
+| Usuario Linux a eliminar | Text | `managed_user` | Sí | Sin valor |
+| Confirmar eliminación | Multiple Choice | `delete_user_confirmation` | Sí | `false` |
+
+En la confirmación, configure las opciones `false` y `true`. El trabajo sólo
+continúa cuando se selecciona `true`. Por seguridad, el playbook rechaza nombres
+vacíos o inválidos y protege las cuentas `root` y `svc_ansible`.
+
+También retira las reglas sudo que este repositorio pudiera haber creado en
+`/etc/sudoers.d/<usuario>` o `/etc/sudoers.d/jumpserver-<usuario>`. De forma
+predeterminada elimina el directorio personal y el spool de correo del usuario.
+Para conservarlos, defina
+`managed_user_remove_home: false` en las variables del Job Template. Antes de
+una ejecución masiva, pruebe el Job Template sobre un solo servidor mediante el
+campo `Límite` de AWX.
+
 ## Execution Environment
 
 Para `ansible-core 2.15`, las colecciones están fijadas a versiones compatibles

@@ -1,0 +1,40 @@
+---
+- name: Eliminar usuario administrado
+  hosts: all
+  become: true
+  gather_facts: false
+
+  vars:
+    managed_user_remove_home: true
+    protected_users:
+      - root
+      - svc_ansible
+
+  pre_tasks:
+    - name: Validar los datos recibidos desde el Survey
+      ansible.builtin.assert:
+        that:
+          - (managed_user | default('') | trim | length) > 0
+          - (managed_user | default('')) is match('^[a-z_][a-z0-9_-]*[$]?$')
+          - (managed_user | default('')) not in protected_users
+          - delete_user_confirmation | default(false) | bool
+        fail_msg: >-
+          Operación cancelada. Indique un nombre de usuario Linux válido, confirme
+          la eliminación y verifique que no sea una cuenta protegida.
+
+  tasks:
+    - name: Eliminar la regla sudo de JumpServer si existe
+      ansible.builtin.file:
+        path: "/etc/sudoers.d/jumpserver-{{ managed_user }}"
+        state: absent
+
+    - name: Eliminar la regla sudo genérica si existe
+      ansible.builtin.file:
+        path: "/etc/sudoers.d/{{ managed_user }}"
+        state: absent
+
+    - name: Eliminar el usuario solicitado
+      ansible.builtin.user:
+        name: "{{ managed_user }}"
+        state: absent
+        remove: "{{ managed_user_remove_home | bool }}"
