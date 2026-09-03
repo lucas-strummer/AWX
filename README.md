@@ -4,10 +4,10 @@ Este repositorio también contiene playbooks operativos reutilizables importados
 en [`playbooks/`](playbooks/). La importación fue sanitizada antes de publicarse:
 
 - no incluye inventarios reales, direcciones IP ni reportes generados;
-- no almacena hashes de contraseñas ni claves SSH;
+- no almacena hashes de contraseñas ni claves SSH privadas;
 - las credenciales se reciben mediante variables protegidas de AWX o Ansible
   Vault;
-- `.gitignore` bloquea inventarios, claves, vaults y resultados habituales.
+- `.gitignore` bloquea inventarios, claves privadas, vaults y resultados habituales.
 
 Los valores mínimos para los playbooks de usuario y clave son
 `managed_user`, `managed_user_groups`, `managed_user_password_hash` y
@@ -15,7 +15,7 @@ Los valores mínimos para los playbooks de usuario y clave son
 inyectarse desde credenciales protegidas y nunca desde archivos versionados.
 
 La solución separa la generación de credenciales del bootstrap de servidores.
-Ninguna clave SSH se almacena en Git:
+Ninguna clave SSH privada se almacena en Git:
 
 - la clave privada queda cifrada en una credencial `Machine` de AWX;
 - la clave pública queda cifrada en una credencial personalizada de AWX;
@@ -73,6 +73,40 @@ En ambos casos instala la clave pública y valida
 
 Cuando todos los hosts estén preparados, los Job Templates normales pueden usar
 la credencial `svc_ansible SSH` con escalamiento de privilegios.
+
+## Cuenta `operador` para JumpServer
+
+El playbook
+[`playbooks/jumpserver/provisionar_operador.yml`](playbooks/jumpserver/provisionar_operador.yml)
+crea la cuenta Linux `operador`, bloquea su contraseña e instala la clave pública
+versionada en
+[`playbooks/jumpserver/files/jumpserver_operador_ed25519.pub`](playbooks/jumpserver/files/jumpserver_operador_ed25519.pub).
+
+La clave autorizada sólo acepta conexiones cuyo origen sea JumpServer
+(`10.100.100.84`) y deshabilita agent forwarding, port forwarding, X11 forwarding
+y los comandos de inicio definidos en `~/.ssh/rc`. Se conserva la asignación de
+PTY necesaria para la terminal interactiva.
+
+Configure un Job Template con:
+
+- el inventario de servidores Linux de destino;
+- la credencial `Machine` de `svc_ansible`;
+- escalamiento de privilegios;
+- el playbook `playbooks/jumpserver/provisionar_operador.yml`.
+
+Ejecute primero sobre un único servidor mediante `Límite`. Confirme en sus logs
+SSH que la conexión de JumpServer se vea con origen `10.100.100.84`; si existe
+NAT, sobrescriba `jumpserver_source_ip` desde Extra Variables con la dirección
+real observada.
+
+`operador_authorized_key_exclusive` vale `true`, por lo que elimina del usuario
+`operador` cualquier clave que no esté declarada por este playbook. Cámbielo a
+`false` durante la primera ejecución si la cuenta ya existe y necesita auditar
+sus claves antes de reemplazarlas.
+
+La clave privada correspondiente debe cargarse como credencial de la cuenta
+`operador` en JumpServer y mantenerse fuera de Git y AWX. El playbook no concede
+permisos sudo a `operador`.
 
 ## Execution Environment
 

@@ -11,6 +11,7 @@ inventory.yaml
 *.pem
 *.key
 *.pub
+!playbooks/jumpserver/files/jumpserver_operador_ed25519.pub
 *.vault
 vault-password*
 group_vars/*/vault.yml

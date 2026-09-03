@@ -1,0 +1,74 @@
+---
+- name: Aprovisionar la cuenta operador utilizada por JumpServer
+  hosts: all
+  become: true
+  gather_facts: true
+  serial: 20
+
+  vars:
+    operador_user: operador
+    operador_group: operador
+    operador_shell: /bin/bash
+    operador_authorized_key_exclusive: true
+    jumpserver_source_ip: "10.100.100.84"
+    operador_public_key_file: >-
+      {{ playbook_dir }}/files/jumpserver_operador_ed25519.pub
+
+  pre_tasks:
+    - name: Validar la plataforma de destino
+      ansible.builtin.assert:
+        that:
+          - ansible_system == "Linux"
+        fail_msg: Este playbook solamente admite servidores Linux.
+
+    - name: Cargar y validar la clave pública de operador
+      ansible.builtin.set_fact:
+        operador_public_key: >-
+          {{ lookup('ansible.builtin.file', operador_public_key_file) | trim }}
+      no_log: true
+
+    - name: Comprobar el formato de la clave y la IP de JumpServer
+      ansible.builtin.assert:
+        that:
+          - operador_public_key is match('^ssh-ed25519 [A-Za-z0-9+/]+={0,3}( .*)?$')
+          - jumpserver_source_ip is match('^[0-9]{1,3}(\.[0-9]{1,3}){3}$')
+        fail_msg: La clave pública o jumpserver_source_ip no tienen un formato válido.
+
+  tasks:
+    - name: Crear el grupo operador
+      ansible.builtin.group:
+        name: "{{ operador_group }}"
+        state: present
+
+    - name: Crear el usuario operador con la contraseña bloqueada
+      ansible.builtin.user:
+        name: "{{ operador_user }}"
+        comment: Cuenta administrada por JumpServer
+        group: "{{ operador_group }}"
+        shell: "{{ operador_shell }}"
+        create_home: true
+        password_lock: true
+        state: present
+
+    - name: Instalar la clave autorizada para conexiones desde JumpServer
+      ansible.posix.authorized_key:
+        user: "{{ operador_user }}"
+        key: "{{ operador_public_key }}"
+        key_options: 'from="{{ jumpserver_source_ip }}",no-agent-forwarding,no-port-forwarding,no-X11-forwarding,no-user-rc'
+        state: present
+        exclusive: "{{ operador_authorized_key_exclusive | bool }}"
+        manage_dir: true
+      no_log: true
+
+    - name: Consultar el estado de la contraseña
+      ansible.builtin.command:
+        cmd: "passwd -S {{ operador_user }}"
+      register: operador_password_status
+      changed_when: false
+
+    - name: Informar el resultado
+      ansible.builtin.debug:
+        msg:
+          - "Usuario administrado: {{ operador_user }}"
+          - "Origen SSH autorizado: {{ jumpserver_source_ip }}"
+          - "Estado de contraseña: {{ operador_password_status.stdout }}"
