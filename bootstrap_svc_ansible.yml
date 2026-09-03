@@ -20,7 +20,18 @@
           credencial 'svc_ansible Public Key'.
 
   tasks:
-    - name: Crear el usuario svc_ansible
+    - name: Consultar si el usuario svc_ansible ya existe
+      ansible.builtin.getent:
+        database: passwd
+        key: "{{ svc_ansible_user }}"
+        fail_key: false
+
+    - name: Registrar si el usuario svc_ansible ya existía
+      ansible.builtin.set_fact:
+        svc_ansible_user_exists: >-
+          {{ svc_ansible_user in (ansible_facts.getent_passwd | default({})) }}
+
+    - name: Crear el usuario svc_ansible cuando no existe
       ansible.builtin.user:
         name: "{{ svc_ansible_user }}"
         comment: "Cuenta de servicio para automatización de Ansible"
@@ -28,6 +39,14 @@
         create_home: true
         password_lock: true
         state: present
+      when: not svc_ansible_user_exists
+
+    - name: Informar que se conservará el usuario existente
+      ansible.builtin.debug:
+        msg: >-
+          El usuario {{ svc_ansible_user }} ya existe; se conservan sus
+          atributos actuales y se continúa con la clave SSH y sudo.
+      when: svc_ansible_user_exists
 
     - name: Instalar la clave pública autorizada
       ansible.posix.authorized_key:
