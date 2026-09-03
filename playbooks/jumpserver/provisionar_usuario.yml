@@ -63,6 +63,12 @@
         - managed_user_exists
         - managed_user_lock_password | bool
 
+    - name: Asegurar Bash como shell predeterminada
+      ansible.builtin.user:
+        name: "{{ managed_user }}"
+        shell: "{{ managed_user_shell }}"
+        state: present
+
     - name: Instalar la clave pública autorizada
       ansible.posix.authorized_key:
         user: "{{ managed_user }}"

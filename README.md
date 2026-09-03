@@ -136,9 +136,10 @@ actual de su contraseña. La clave instalada es exclusiva y sólo se acepta desd
 `managed_user_authorized_key_exclusive`,
 `managed_user_restrict_to_jumpserver` y `jumpserver_source_ip`.
 
-Si el usuario ya existe, se conservan su shell, grupo primario, comentario y
-directorio personal. El playbook administra su bloqueo de contraseña, su clave
-autorizada y únicamente el archivo sudoers con prefijo `jumpserver-`.
+Si el usuario ya existe, se conservan su grupo primario, comentario y directorio
+personal, pero su shell se establece explícitamente en `/bin/bash`. El playbook
+también administra su bloqueo de contraseña, su clave autorizada y únicamente el
+archivo sudoers con prefijo `jumpserver-`.
 
 ## Execution Environment
 
