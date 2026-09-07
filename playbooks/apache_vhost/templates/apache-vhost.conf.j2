@@ -1,0 +1,38 @@
+<VirtualHost *:443>
+    ServerAdmin webmaster@localhost
+    ServerName {{ apache_vhost_server_name }}
+
+    AddType application/x-x509-ca-cert .crt
+    AddType application/x-pkcs7-crl .crl
+
+    RewriteEngine On
+    RewriteCond %{REQUEST_METHOD} !^(GET|POST|HEAD)
+    RewriteRule .* - [R=405,L]
+    RewriteOptions inherit
+
+    SSLEngine on
+    SSLOptions +StdEnvVars
+    SSLVerifyClient none
+    SSLHonorCipherOrder On
+    SSLCipherSuite ALL:!aNULL:!DH:!eNULL:!LOW:!EXP:!RC4+RSA:+HIGH:!MEDIUM
+    SSLProtocol all -SSLv3 -SSLv2
+    SSLCertificateFile {{ apache_vhost_ssl_certificate }}
+    SSLCertificateKeyFile {{ apache_vhost_ssl_key }}
+    SSLCertificateChainFile {{ apache_vhost_ssl_chain }}
+
+    ProxyRequests off
+    SSLProxyEngine On
+    SSLProxyVerify none
+    SSLProxyCheckPeerCN off
+    ProxyPass / {{ apache_vhost_proxy }}
+    ProxyPassReverse / {{ apache_vhost_proxy }}
+    ProxyPreserveHost Off
+
+    ErrorLog "/var/log/apache2/{{ apache_vhost_id }}-error_log"
+    CustomLog "/var/log/apache2/{{ apache_vhost_id }}-access_log" common
+
+    BrowserMatch "MSIE [2-6]" \
+        nokeepalive ssl-unclean-shutdown \
+        downgrade-1.0 force-response-1.0
+    BrowserMatch "MSIE [17-9]" ssl-unclean-shutdown
+</VirtualHost>

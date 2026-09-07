@@ -168,6 +168,35 @@ campo `Límite` de AWX.
 
 ## Execution Environment
 
+## Alta de vhosts Apache
+
+El playbook
+[`playbooks/apache_vhost/alta_vhost.yml`](playbooks/apache_vhost/alta_vhost.yml)
+crea un virtual host HTTPS en Apache, habilita los módulos necesarios y
+configura un proxy reverso hacia el destino indicado. Usa las rutas estándar de
+certificados:
+
+```text
+/etc/apache2/ssl/comodin_2025.crt
+/etc/apache2/ssl/comodin_2023.key
+/etc/apache2/ssl/DigiCertCA.crt
+```
+
+Configure el Job Template con inventario Linux, credencial `Machine` y
+escalamiento de privilegios. El Survey está definido en
+[`playbooks/apache_vhost/survey.yml`](playbooks/apache_vhost/survey.yml) y debe
+cargarse en el Job Template con estas preguntas:
+
+| Pregunta | Tipo | Variable | Obligatoria |
+| --- | --- | --- | --- |
+| Server Name del vhost | Text | `apache_vhost_server_name` | Sí |
+| Destino del proxy | Text | `apache_vhost_proxy_url` | Sí |
+
+El primer valor debe ser un hostname, por ejemplo
+`portal-de-pagos.msm.gov.ar`. El segundo debe ser una URL `http` o `https`, por
+ejemplo `http://172.20.40.24:8300/`. Antes de recargar Apache se ejecuta
+`apachectl configtest`; si la validación falla, no se aplica la recarga.
+
 Para `ansible-core 2.15`, las colecciones están fijadas a versiones compatibles
 en `collections/requirements.yml`:
 

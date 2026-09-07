@@ -1,0 +1,67 @@
+---
+- name: Dar de alta un virtual host HTTPS de Apache con proxy reverso
+  hosts: all
+  become: true
+  gather_facts: true
+
+  vars:
+    apache_vhost_ssl_certificate: /etc/apache2/ssl/comodin_2025.crt
+    apache_vhost_ssl_key: /etc/apache2/ssl/comodin_2023.key
+    apache_vhost_ssl_chain: /etc/apache2/ssl/DigiCertCA.crt
+    apache_vhost_conf_dir: /etc/apache2/sites-available
+    apache_vhost_enabled_dir: /etc/apache2/sites-enabled
+
+  pre_tasks:
+    - name: Validar los datos recibidos desde el Survey de AWX
+      ansible.builtin.assert:
+        that:
+          - apache_vhost_server_name is defined
+          - apache_vhost_server_name is match('^[A-Za-z0-9](?:[A-Za-z0-9.-]*[A-Za-z0-9])?$')
+          - apache_vhost_proxy_url is defined
+          - apache_vhost_proxy_url is match('^https?://[^/[:space:]]+(?:/)?$')
+        fail_msg: >-
+          Server Name debe ser un hostname sin esquema ni ruta y el destino debe
+          tener formato http(s)://host[:puerto]/.
+
+    - name: Derivar nombres seguros para el archivo y los logs
+      ansible.builtin.set_fact:
+        apache_vhost_id: "{{ apache_vhost_server_name | regex_replace('[^A-Za-z0-9_.-]', '_') }}"
+        apache_vhost_proxy: "{{ apache_vhost_proxy_url.rstrip('/') }}/"
+
+  tasks:
+    - name: Habilitar módulos necesarios de Apache
+      ansible.builtin.command: "a2enmod {{ item }}"
+      loop:
+        - proxy
+        - proxy_http
+        - ssl
+        - rewrite
+      register: apache_vhost_modules
+      changed_when: "'already enabled' not in apache_vhost_modules.stdout"
+      notify: Validar y recargar Apache
+
+    - name: Crear configuración del virtual host
+      ansible.builtin.template:
+        src: apache-vhost.conf.j2
+        dest: "{{ apache_vhost_conf_dir }}/{{ apache_vhost_id }}.conf"
+        owner: root
+        group: root
+        mode: '0644'
+      notify: Validar y recargar Apache
+
+    - name: Habilitar el virtual host
+      ansible.builtin.command: "a2ensite {{ apache_vhost_id }}.conf"
+      args:
+        creates: "{{ apache_vhost_enabled_dir }}/{{ apache_vhost_id }}.conf"
+      notify: Validar y recargar Apache
+
+  handlers:
+    - name: Validar y recargar Apache
+      ansible.builtin.command: apachectl configtest
+      changed_when: false
+      notify: Recargar Apache
+
+    - name: Recargar Apache
+      ansible.builtin.service:
+        name: apache2
+        state: reloaded
