@@ -21,15 +21,18 @@
 
   tasks:
     - name: Consultar si el usuario svc_ansible ya existe
-      ansible.builtin.getent:
-        database: passwd
-        key: "{{ svc_ansible_user }}"
-        fail_key: false
+      ansible.builtin.command:
+        argv:
+          - getent
+          - passwd
+          - "{{ svc_ansible_user }}"
+      register: svc_ansible_getent_result
+      changed_when: false
+      failed_when: false
 
     - name: Registrar si el usuario svc_ansible ya existía
       ansible.builtin.set_fact:
-        svc_ansible_user_exists: >-
-          {{ svc_ansible_user in (ansible_facts.getent_passwd | default({})) }}
+        svc_ansible_user_exists: "{{ svc_ansible_getent_result.rc == 0 }}"
 
     - name: Crear el usuario svc_ansible cuando no existe
       ansible.builtin.user:
