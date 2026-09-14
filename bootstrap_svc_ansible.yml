@@ -37,7 +37,7 @@
     - name: Crear el usuario svc_ansible cuando no existe
       ansible.builtin.user:
         name: "{{ svc_ansible_user }}"
-        comment: "Cuenta de servicio para automatización de Ansible"
+        comment: "Servicio Ansible"
         shell: "{{ svc_ansible_shell }}"
         create_home: true
         password_lock: true
