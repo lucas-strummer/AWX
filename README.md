@@ -68,7 +68,7 @@ Job Template o actívelo como opción de pregunta al ejecutar.
 El bootstrap no genera claves. Puede ejecutarse repetidamente y también sobre
 servidores nuevos. Primero consulta la base de usuarios del sistema: si
 `svc_ansible` no existe, lo crea; si ya existe, conserva sus atributos actuales.
-En ambos casos instala la clave pública y valida
+En ambos casos bloquea la contraseña, instala la clave pública y valida
 `/etc/sudoers.d/svc_ansible` con `visudo`.
 
 Cuando todos los hosts estén preparados, los Job Templates normales pueden usar

@@ -48,8 +48,15 @@
       ansible.builtin.debug:
         msg: >-
           El usuario {{ svc_ansible_user }} ya existe; se conservan sus
-          atributos actuales y se continúa con la clave SSH y sudo.
+          atributos actuales y se continúa con el bloqueo de contraseña, la
+          clave SSH y sudo.
       when: svc_ansible_user_exists
+
+    - name: Bloquear la contraseña de svc_ansible
+      ansible.builtin.user:
+        name: "{{ svc_ansible_user }}"
+        password_lock: true
+        state: present
 
     - name: Instalar la clave pública autorizada
       ansible.posix.authorized_key:
